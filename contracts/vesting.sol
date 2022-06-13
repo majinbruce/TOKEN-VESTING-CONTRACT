@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
-contract vesting is AccessControl, Ownable, ReentrancyGuard {
+contract vesting is Ownable, ReentrancyGuard {
     bytes32 public constant ADVISOR = keccak256("Advisor");
     bytes32 public constant PARTNER = keccak256("Partner");
     bytes32 public constant MENTOR = keccak256("Mentor");
@@ -25,6 +25,8 @@ contract vesting is AccessControl, Ownable, ReentrancyGuard {
     // benificiary => vesting schedule of the address
     mapping(bytes32 => mapping(address => VestingSchedule))
         public VestingSchedulePerRoleAndAddress;
+    // tracks token percentage per role
+    mapping(bytes32 => uint256) public tokenPercentage;
 
     struct VestingSchedule {
         address beneficiary;
@@ -39,6 +41,9 @@ contract vesting is AccessControl, Ownable, ReentrancyGuard {
 
     constructor(IERC20 _token) {
         token = _token;
+        tokenPercentage[ADVISOR] = 3;
+        tokenPercentage[PARTNER] = 5;
+        tokenPercentage[MENTOR] = 4;
     }
 
     function getVestingSchedule(string memory _role, address _beneficiary)
@@ -50,11 +55,17 @@ contract vesting is AccessControl, Ownable, ReentrancyGuard {
         return VestingSchedulePerRoleAndAddress[_roleInBytes][_beneficiary];
     }
 
+    function getCurrentTime() internal view virtual returns (uint256) {
+        return block.timestamp;
+    }
+
     function calculateTotalTokensReleased(uint256 _percentageOfTotalSupply)
         private
         view
         returns (uint256)
-    {}
+    {
+        return token.totalSupply().mul(_percentageOfTotalSupply).div(100);
+    }
 
     function validateClaimVestedTokens() private view {}
 
@@ -64,7 +75,26 @@ contract vesting is AccessControl, Ownable, ReentrancyGuard {
         return keccak256(abi.encode(_role));
     }
 
-    function validateVestingSchedule() private {}
+    function validateVestingSchedule(
+        address _beneficiary,
+        string memory _role,
+        uint256 _startInMonths,
+        uint256 _cliffInMonths,
+        uint256 _durationInMonths,
+        uint256 _percentageOfTotalSupply
+    ) private {
+        bytes32 _roleInBytes = getRole(_role);
+
+        VestingSchedule
+            storage vestingSchedule = VestingSchedulePerRoleAndAddress[
+                _roleInBytes
+            ][_beneficiary];
+
+        require(
+            !vestingSchedule.isVested,
+            "VESTING : tokens for this address and role already vested"
+        );
+    }
 
     function createVestingSchedule(
         address _beneficiary,
@@ -74,6 +104,15 @@ contract vesting is AccessControl, Ownable, ReentrancyGuard {
         uint256 _durationInMonths,
         uint256 _percentageOfTotalSupply
     ) external onlyOwner {
+        require(
+            _beneficiary != address(0x00),
+            "VESTING: benificiary cannot be 0 address"
+        );
+        require(
+            _role == "Advisor" || _role == "Partner" || _role == "Mentor",
+            "VESTING: enter correct role"
+        );
+
         bytes32 _roleInBytes = getRole(_role);
 
         uint256 _totalTokensReleased = calculateTotalTokensReleased(
