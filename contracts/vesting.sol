@@ -2,7 +2,6 @@
 pragma solidity ^0.8.4;
 pragma experimental ABIEncoderV2;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -24,45 +23,75 @@ contract vesting is AccessControl, Ownable, ReentrancyGuard {
         private availableTokensPerRoleAndAddress;
 
     // benificiary => vesting schedule of the address
-    mapping(address => VestingSchedule) public VestingSchedulePerAddress;
+    mapping(bytes32 => mapping(address => VestingSchedule))
+        public VestingSchedulePerRoleAndAddress;
 
     struct VestingSchedule {
         address beneficiary;
         bytes32 role;
         bool isVested;
+        uint256 start;
         uint256 cliff;
         uint256 duration;
         uint256 percentageOfTotalSupply;
         uint256 totalTokensReleased;
     }
 
-    constructor(
-        IERC20 _token,
-        address advisor,
-        address partner,
-        address mentor
-    ) {
+    constructor(IERC20 _token) {
         token = _token;
-        _setupRole(ADVISOR, advisor);
-        _setupRole(PARTNER, partner);
-        _setupRole(ADVISOR, mentor);
     }
 
-    function getVestingSchedule(address _beneficiary)
+    function getVestingSchedule(string memory _role, address _beneficiary)
         public
         view
         returns (VestingSchedule memory)
     {
-        return VestingSchedulePerAddress[_beneficiary];
+        bytes32 _roleInBytes = getRole(_role);
+        return VestingSchedulePerRoleAndAddress[_roleInBytes][_beneficiary];
     }
+
+    function calculateTotalTokensReleased(uint256 _percentageOfTotalSupply)
+        private
+        view
+        returns (uint256)
+    {}
+
+    function validateClaimVestedTokens() private view {}
+
+    function claimVestedTokens() public view {}
+
+    function getRole(string memory _role) public pure returns (bytes32) {
+        return keccak256(abi.encode(_role));
+    }
+
+    function validateVestingSchedule() private {}
 
     function createVestingSchedule(
         address _beneficiary,
-        bytes32 _role,
-        uint256 _cliff,
-        uint256 _duration,
+        string memory _role,
+        uint256 _startInMonths,
+        uint256 _cliffInMonths,
+        uint256 _durationInMonths,
         uint256 _percentageOfTotalSupply
-    ) public onlyOwner {
-        _setupRole(_role, _beneficiary);
+    ) external onlyOwner {
+        bytes32 _roleInBytes = getRole(_role);
+
+        uint256 _totalTokensReleased = calculateTotalTokensReleased(
+            _percentageOfTotalSupply
+        );
+
+        // create schedule in mapping
+        VestingSchedulePerRoleAndAddress[_roleInBytes][
+            _beneficiary
+        ] = VestingSchedule(
+            _beneficiary,
+            _roleInBytes,
+            true,
+            _startInMonths,
+            _cliffInMonths,
+            _durationInMonths,
+            _percentageOfTotalSupply,
+            _totalTokensReleased
+        );
     }
 }
