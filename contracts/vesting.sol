@@ -26,7 +26,7 @@ contract vesting is Ownable, ReentrancyGuard {
     mapping(bytes32 => mapping(address => VestingSchedule))
         public VestingSchedulePerRoleAndAddress;
     // tracks token percentage per role
-    mapping(bytes32 => uint256) public tokenPercentage;
+    mapping(bytes32 => uint256) public availableTokenPercentagePerRole;
 
     struct VestingSchedule {
         address beneficiary;
@@ -41,9 +41,9 @@ contract vesting is Ownable, ReentrancyGuard {
 
     constructor(IERC20 _token) {
         token = _token;
-        tokenPercentage[ADVISOR] = 3;
-        tokenPercentage[PARTNER] = 5;
-        tokenPercentage[MENTOR] = 4;
+        availableTokenPercentagePerRole[ADVISOR] = 3;
+        availableTokenPercentagePerRole[PARTNER] = 5;
+        availableTokenPercentagePerRole[MENTOR] = 4;
     }
 
     function getVestingSchedule(string memory _role, address _beneficiary)
@@ -51,7 +51,7 @@ contract vesting is Ownable, ReentrancyGuard {
         view
         returns (VestingSchedule memory)
     {
-        bytes32 _roleInBytes = getRole(_role);
+        bytes32 _roleInBytes = getRoleInBytesFromString(_role);
         return VestingSchedulePerRoleAndAddress[_roleInBytes][_beneficiary];
     }
 
@@ -71,7 +71,11 @@ contract vesting is Ownable, ReentrancyGuard {
 
     function claimVestedTokens() public view {}
 
-    function getRole(string memory _role) public pure returns (bytes32) {
+    function getRoleInBytesFromString(string memory _role)
+        public
+        pure
+        returns (bytes32)
+    {
         return keccak256(abi.encode(_role));
     }
 
@@ -83,7 +87,7 @@ contract vesting is Ownable, ReentrancyGuard {
         uint256 _durationInMonths,
         uint256 _percentageOfTotalSupply
     ) private {
-        bytes32 _roleInBytes = getRole(_role);
+        bytes32 _roleInBytes = getRoleInBytesFromString(_role);
 
         VestingSchedule
             storage vestingSchedule = VestingSchedulePerRoleAndAddress[
@@ -104,18 +108,34 @@ contract vesting is Ownable, ReentrancyGuard {
         uint256 _durationInMonths,
         uint256 _percentageOfTotalSupply
     ) external onlyOwner {
+        bytes32 _roleInBytes = getRoleInBytesFromString(_role);
+
         require(
             _beneficiary != address(0x00),
             "VESTING: benificiary cannot be 0 address"
         );
+
         require(
-            _role == "Advisor" || _role == "Partner" || _role == "Mentor",
+            _roleInBytes == ADVISOR ||
+                _roleInBytes == PARTNER ||
+                _roleInBytes == MENTOR,
             "VESTING: enter correct role"
         );
 
-        bytes32 _roleInBytes = getRole(_role);
+        require(
+            _percentageOfTotalSupply <=
+                availableTokenPercentagePerRole[_roleInBytes],
+            "VESTING: cannot allocate entered percentage of tokens for this role"
+        );
 
         uint256 _totalTokensReleased = calculateTotalTokensReleased(
+            _percentageOfTotalSupply
+        );
+
+        // update available percentace per role
+        availableTokenPercentagePerRole[
+            _roleInBytes
+        ] = availableTokenPercentagePerRole[_roleInBytes].sub(
             _percentageOfTotalSupply
         );
 
