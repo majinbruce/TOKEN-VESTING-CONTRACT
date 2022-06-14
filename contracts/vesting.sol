@@ -81,14 +81,9 @@ contract vesting is Ownable, ReentrancyGuard {
 
     function validateVestingSchedule(
         address _beneficiary,
-        string memory _role,
-        uint256 _startInMonths,
-        uint256 _cliffInMonths,
-        uint256 _durationInMonths,
+        bytes32 _roleInBytes,
         uint256 _percentageOfTotalSupply
-    ) private {
-        bytes32 _roleInBytes = getRoleInBytesFromString(_role);
-
+    ) private view {
         VestingSchedule
             storage vestingSchedule = VestingSchedulePerRoleAndAddress[
                 _roleInBytes
@@ -98,18 +93,6 @@ contract vesting is Ownable, ReentrancyGuard {
             !vestingSchedule.isVested,
             "VESTING : tokens for this address and role already vested"
         );
-    }
-
-    function createVestingSchedule(
-        address _beneficiary,
-        string memory _role,
-        uint256 _startInMonths,
-        uint256 _cliffInMonths,
-        uint256 _durationInMonths,
-        uint256 _percentageOfTotalSupply
-    ) external onlyOwner {
-        bytes32 _roleInBytes = getRoleInBytesFromString(_role);
-
         require(
             _beneficiary != address(0x00),
             "VESTING: benificiary cannot be 0 address"
@@ -126,6 +109,22 @@ contract vesting is Ownable, ReentrancyGuard {
             _percentageOfTotalSupply <=
                 availableTokenPercentagePerRole[_roleInBytes],
             "VESTING: cannot allocate entered percentage of tokens for this role"
+        );
+    }
+
+    function createVestingSchedule(
+        address _beneficiary,
+        string memory _role,
+        uint256 _startInMonths,
+        uint256 _cliffInMonths,
+        uint256 _durationInMonths,
+        uint256 _percentageOfTotalSupply
+    ) external onlyOwner {
+        bytes32 _roleInBytes = getRoleInBytesFromString(_role);
+        validateVestingSchedule(
+            _beneficiary,
+            _roleInBytes,
+            _percentageOfTotalSupply
         );
 
         uint256 _totalTokensReleased = calculateTotalTokensReleased(
