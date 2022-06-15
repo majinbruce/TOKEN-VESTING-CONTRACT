@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.4;
 pragma experimental ABIEncoderV2;
+import "hardhat/console.sol";
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -17,15 +18,16 @@ contract vesting is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     IERC20 private immutable token;
     uint256 private immutable oneMonthInSeconds = 2629743;
+    uint256 private immutable oneDayInSeconds = 86400;
 
     // role => address of role owner => total available tokens
     mapping(bytes32 => mapping(address => uint256))
-        private availableTokensPerRoleAndAddress;
+        public availableTokensPerRoleAndAddress;
 
     // benificiary => vesting schedule of the address
     mapping(bytes32 => mapping(address => VestingSchedule))
         public VestingSchedulePerRoleAndAddress;
-    // tracks token percentage per role
+    // tracks available token percentage per role
     mapping(bytes32 => uint256) public availableTokenPercentagePerRole;
 
     struct VestingSchedule {
@@ -37,6 +39,7 @@ contract vesting is Ownable, ReentrancyGuard {
         uint256 duration;
         uint256 percentageOfTotalSupply;
         uint256 totalTokensReleased;
+        uint256 tokensToReleasePerDay;
     }
 
     constructor(IERC20 _token) {
@@ -60,26 +63,22 @@ contract vesting is Ownable, ReentrancyGuard {
     }
 
     function calculateTotalTokensReleased(uint256 _percentageOfTotalSupply)
-        private
+        public
         view
         returns (uint256)
     {
         return token.totalSupply().mul(_percentageOfTotalSupply).div(100);
     }
 
-    function validateClaimVestedTokens() private view {}
-
-    function claimVestedTokens() public view {}
-
     function getRoleInBytesFromString(string memory _role)
         public
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(_role));
+        return keccak256(abi.encodePacked(_role));
     }
 
-    function validateVestingSchedule(
+    function preVestingScheduleValidation(
         address _beneficiary,
         bytes32 _roleInBytes,
         uint256 _percentageOfTotalSupply
@@ -112,6 +111,14 @@ contract vesting is Ownable, ReentrancyGuard {
         );
     }
 
+    function convertFromMonthToSeconds(uint256 _time)
+        private
+        pure
+        returns (uint256)
+    {
+        return _time.mul(oneMonthInSeconds);
+    }
+
     function createVestingSchedule(
         address _beneficiary,
         string memory _role,
@@ -121,7 +128,8 @@ contract vesting is Ownable, ReentrancyGuard {
         uint256 _percentageOfTotalSupply
     ) external onlyOwner {
         bytes32 _roleInBytes = getRoleInBytesFromString(_role);
-        validateVestingSchedule(
+
+        preVestingScheduleValidation(
             _beneficiary,
             _roleInBytes,
             _percentageOfTotalSupply
@@ -131,12 +139,30 @@ contract vesting is Ownable, ReentrancyGuard {
             _percentageOfTotalSupply
         );
 
+        // sets available Tokens per role & address
+        availableTokensPerRoleAndAddress[_roleInBytes][
+            _beneficiary
+        ] = _totalTokensReleased;
+
         // update available percentace per role
         availableTokenPercentagePerRole[
             _roleInBytes
         ] = availableTokenPercentagePerRole[_roleInBytes].sub(
             _percentageOfTotalSupply
         );
+
+        uint256 startInSeconds = convertFromMonthToSeconds(_startInMonths).add(
+            getCurrentTime()
+        );
+        uint256 cliffInSeconds = convertFromMonthToSeconds(_cliffInMonths).add(
+            startInSeconds
+        );
+        uint256 durationInSeconds = convertFromMonthToSeconds(_durationInMonths)
+            .add(cliffInSeconds);
+
+        uint256 tokensToReleasePerDay = _totalTokensReleased
+            .mul(durationInSeconds)
+            .div(oneDayInSeconds);
 
         // create schedule in mapping
         VestingSchedulePerRoleAndAddress[_roleInBytes][
@@ -145,11 +171,72 @@ contract vesting is Ownable, ReentrancyGuard {
             _beneficiary,
             _roleInBytes,
             true,
-            _startInMonths,
-            _cliffInMonths,
-            _durationInMonths,
+            startInSeconds,
+            cliffInSeconds,
+            durationInSeconds,
             _percentageOfTotalSupply,
-            _totalTokensReleased
+            _totalTokensReleased,
+            tokensToReleasePerDay
         );
+    }
+
+    function prereleaseVestedTokensValidation(
+        address _beneficiary,
+        bytes32 _roleInBytes,
+        uint256 _amount
+    ) private view {
+        VestingSchedule
+            storage vestingSchedule = VestingSchedulePerRoleAndAddress[
+                _roleInBytes
+            ][_beneficiary];
+
+        require(
+            vestingSchedule.isVested,
+            "VESTING : tokens for this address and role are not vested"
+        );
+
+        bool isBeneficiary = msg.sender == vestingSchedule.beneficiary;
+        bool isOwner = msg.sender == owner();
+        require(
+            isBeneficiary || isOwner,
+            "VESTING: only beneficiary and owner can claim vested tokens"
+        );
+
+        require(
+            _roleInBytes == ADVISOR ||
+                _roleInBytes == PARTNER ||
+                _roleInBytes == MENTOR,
+            "VESTING: enter correct role"
+        );
+
+        require(getCurrentTime() < vestingSchedule.cliff);
+
+        require(
+            availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary] >
+                vestingSchedule.tokensToReleasePerDay,
+            "VESTING: you claimed all your tokens bro"
+        );
+        require(
+            _amount < vestingSchedule.tokensToReleasePerDay,
+            "VESTING: you are not allowed to claim the entered amount of tokens"
+        );
+    }
+
+    function releaseVestedTokens(
+        address _beneficiary,
+        string memory _roleInString,
+        uint256 _amount
+    ) public {
+        bytes32 _roleInBytes = getRoleInBytesFromString(_roleInString);
+        prereleaseVestedTokensValidation(_beneficiary, _roleInBytes, _amount);
+
+        // update mapping
+        availableTokensPerRoleAndAddress[_roleInBytes][
+            _beneficiary
+        ] = availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary].sub(
+            _amount
+        );
+
+        token.safeTransfer(_beneficiary, _amount);
     }
 }
