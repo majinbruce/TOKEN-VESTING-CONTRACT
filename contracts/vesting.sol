@@ -65,6 +65,15 @@ contract vesting is Ownable, ReentrancyGuard {
         availableTokenPercentagePerRole[MENTOR] = 4;
     }
 
+    function getCreatedSchedule(string memory _role, address beneficiary)
+        public
+        view
+        returns (VestingSchedule memory)
+    {
+        bytes32 roleinString = getRoleInBytesFromString(_role);
+        return VestingSchedulePerRoleAndAddress[roleinString][beneficiary];
+    }
+
     function getCurrentTime() internal view virtual returns (uint256) {
         return block.timestamp;
     }
