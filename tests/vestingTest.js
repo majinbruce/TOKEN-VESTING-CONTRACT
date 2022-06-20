@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { BigNumber } = require("@ethersproject/bignumber");
 
 describe("Staking", () => {
   let owner;
@@ -8,7 +9,7 @@ describe("Staking", () => {
 
   let token;
   let TOKEN;
-  let totalSupply = 1000;
+  let totalSupply = 1000000000;
 
   let VESTING;
   let vesting;
@@ -41,7 +42,7 @@ describe("Staking", () => {
       const _role = "Advisor";
       const _startInMonths = 0;
       const _cliffInMonths = 1;
-      const _durationInMonths = 22;
+      const _durationInMonths = 1;
       const _percentageOfTotalSupply = 2;
 
       await vesting.createVestingSchedule(
@@ -59,7 +60,7 @@ describe("Staking", () => {
       );
 
       // correct amount of tokens are released
-      expect(await _totalTokensReleased).to.equal(20);
+      expect(await _totalTokensReleased).to.equal(20000000);
 
       // token mapping is set correctly
       const tokenMapping = vesting.availableTokensPerRoleAndAddress(
@@ -80,67 +81,83 @@ describe("Staking", () => {
       );
 
       expect(await vestingschedule.isVested).to.equal(true);
+
+      const tokenBalanceBefore = await token.balanceOf(addr1.address);
+
+      // increase evm time BY A MONTH AND A DAY
+      await ethers.provider.send("evm_increaseTime", [2629743 + 86401]);
+
+      await vesting.releaseVestedTokens(_beneficiary, _role);
+
+      const tokenBalanceAfter = await token.balanceOf(addr1.address);
+      expect(tokenBalanceBefore).to.not.equal(tokenBalanceAfter);
+
+      await ethers.provider.send("evm_increaseTime", [100]);
+
+      await expect(
+        vesting.releaseVestedTokens(_beneficiary, _role)
+      ).to.be.revertedWith("VESTING : you can only claim tokens every 24hours");
     });
+  });
 
-    describe("schedule Vesting validation", async function () {
-      it("should throw correct errors while scheduling vesting", async function () {
-        const _beneficiary = addr1.address;
-        const _role = "Advisor";
-        const _startInMonths = 0;
-        const _cliffInMonths = 1;
-        const _durationInMonths = 22;
-        const _percentageOfTotalSupply = 2;
+  describe("schedule Vesting validation", async function () {
+    it("should throw correct errors while scheduling vesting", async function () {
+      const _beneficiary = addr1.address;
+      const _role = "Advisor";
+      const _startInMonths = 1;
+      const _cliffInMonths = 1;
+      const _durationInMonths = 22;
+      const _percentageOfTotalSupply = 2;
 
-        await expect(
-          vesting.createVestingSchedule(
-            _beneficiary,
-            _role,
-            _startInMonths,
-            _cliffInMonths,
-            _durationInMonths,
-            100
-          )
-        ).to.be.revertedWith(
-          "VESTING: cannot allocate entered percentage of tokens for this role"
-        );
+      await expect(
+        vesting.createVestingSchedule(
+          _beneficiary,
+          _role,
+          _startInMonths,
+          _cliffInMonths,
+          _durationInMonths,
+          100
+        )
+      ).to.be.revertedWith(
+        "VESTING: cannot allocate entered percentage of tokens for this role"
+      );
 
-        await expect(
-          vesting.createVestingSchedule(
-            _beneficiary,
-            "SastaAdvisor",
-            _startInMonths,
-            _cliffInMonths,
-            _durationInMonths,
-            _percentageOfTotalSupply
-          )
-        ).to.be.revertedWith("VESTING: enter correct role");
+      await expect(
+        vesting.createVestingSchedule(
+          _beneficiary,
+          "SastaAdvisor",
+          _startInMonths,
+          _cliffInMonths,
+          _durationInMonths,
+          _percentageOfTotalSupply
+        )
+      ).to.be.revertedWith("VESTING: enter correct role");
 
-        // tokens for same role & benificiary are not assigned twice
+      // tokens for same role & benificiary are not assigned twice
 
-        // first create a schedule
-        await vesting.createVestingSchedule(
+      // first create a schedule
+      await vesting.createVestingSchedule(
+        _beneficiary,
+        _role,
+        _startInMonths,
+        _cliffInMonths,
+        _durationInMonths,
+        _percentageOfTotalSupply
+      );
+
+      // expect error here
+      await expect(
+        vesting.createVestingSchedule(
           _beneficiary,
           _role,
           _startInMonths,
           _cliffInMonths,
           _durationInMonths,
           _percentageOfTotalSupply
-        );
-
-        // expect error here
-        await expect(
-          vesting.createVestingSchedule(
-            _beneficiary,
-            _role,
-            _startInMonths,
-            _cliffInMonths,
-            _durationInMonths,
-            _percentageOfTotalSupply
-          )
-        ).to.be.revertedWith(
-          "VESTING : tokens for this address and role already vested"
-        );
-      });
+        )
+      ).to.be.revertedWith(
+        "VESTING : tokens for this address and role already vested"
+      );
     });
   });
 });
