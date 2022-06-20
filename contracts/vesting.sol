@@ -43,6 +43,21 @@ contract vesting is Ownable, ReentrancyGuard {
         uint256 lastClaim;
     }
 
+    event vestingScheduleCreated(
+        address beneficiary,
+        bytes32 role,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration,
+        uint256 percentageOfTotalSupply
+    );
+
+    event tokensReleased(
+        address beneficiary,
+        bytes32 role,
+        uint256 amountOfTokensClaimed
+    );
+
     constructor(IERC20 _token) {
         token = _token;
         availableTokenPercentagePerRole[ADVISOR] = 3;
@@ -168,6 +183,15 @@ contract vesting is Ownable, ReentrancyGuard {
             _totalTokensReleased,
             0
         );
+
+        emit vestingScheduleCreated(
+            _beneficiary,
+            _roleInBytes,
+            startInSeconds,
+            cliffInSeconds,
+            durationInSeconds,
+            _percentageOfTotalSupply
+        );
     }
 
     function calculateTimeElapsed(bytes32 _roleInBytes, address _beneficiary)
@@ -276,5 +300,6 @@ contract vesting is Ownable, ReentrancyGuard {
             .lastClaim = getCurrentTime();
 
         token.safeTransfer(_beneficiary, tokensToRelease);
+        emit tokensReleased(_beneficiary, _roleInBytes, tokensToRelease);
     }
 }
