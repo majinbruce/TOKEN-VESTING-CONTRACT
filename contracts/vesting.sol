@@ -34,12 +34,13 @@ contract vesting is Ownable, ReentrancyGuard {
         address beneficiary;
         bytes32 role;
         bool isVested;
+        uint256 createVestingScheduleTime;
         uint256 start;
         uint256 cliff;
         uint256 duration;
         uint256 percentageOfTotalSupply;
         uint256 totalTokensReleased;
-        uint256 tokensToReleasePerDay;
+        uint256 lastClaim;
     }
 
     constructor(IERC20 _token) {
@@ -47,15 +48,6 @@ contract vesting is Ownable, ReentrancyGuard {
         availableTokenPercentagePerRole[ADVISOR] = 3;
         availableTokenPercentagePerRole[PARTNER] = 5;
         availableTokenPercentagePerRole[MENTOR] = 4;
-    }
-
-    function getVestingSchedule(string memory _role, address _beneficiary)
-        public
-        view
-        returns (VestingSchedule memory)
-    {
-        bytes32 _roleInBytes = getRoleInBytesFromString(_role);
-        return VestingSchedulePerRoleAndAddress[_roleInBytes][_beneficiary];
     }
 
     function getCurrentTime() internal view virtual returns (uint256) {
@@ -151,18 +143,15 @@ contract vesting is Ownable, ReentrancyGuard {
             _percentageOfTotalSupply
         );
 
-        uint256 startInSeconds = convertFromMonthToSeconds(_startInMonths).add(
-            getCurrentTime()
+        uint256 createVestingScheduleTime = getCurrentTime();
+        uint256 startInSeconds = createVestingScheduleTime.add(
+            convertFromMonthToSeconds(_startInMonths)
         );
         uint256 cliffInSeconds = convertFromMonthToSeconds(_cliffInMonths).add(
             startInSeconds
         );
         uint256 durationInSeconds = convertFromMonthToSeconds(_durationInMonths)
             .add(cliffInSeconds);
-
-        uint256 tokensToReleasePerDay = _totalTokensReleased
-            .mul(durationInSeconds)
-            .div(oneDayInSeconds);
 
         // create schedule in mapping
         VestingSchedulePerRoleAndAddress[_roleInBytes][
@@ -171,25 +160,53 @@ contract vesting is Ownable, ReentrancyGuard {
             _beneficiary,
             _roleInBytes,
             true,
+            createVestingScheduleTime,
             startInSeconds,
             cliffInSeconds,
             durationInSeconds,
             _percentageOfTotalSupply,
             _totalTokensReleased,
-            tokensToReleasePerDay
+            0
         );
+    }
+
+    function calculateTimeElapsed(bytes32 _roleInBytes, address _beneficiary)
+        public
+        view
+        returns (uint256)
+    {
+        VestingSchedule
+            storage vestingSchedule = VestingSchedulePerRoleAndAddress[
+                _roleInBytes
+            ][_beneficiary];
+
+        uint256 timeElapsed;
+        uint256 currentTime = getCurrentTime();
+
+        if (vestingSchedule.lastClaim == 0) {
+            timeElapsed = currentTime.sub(vestingSchedule.cliff);
+        } else {
+            timeElapsed = currentTime - vestingSchedule.lastClaim;
+        }
+
+        return (timeElapsed);
     }
 
     function prereleaseVestedTokensValidation(
         address _beneficiary,
-        bytes32 _roleInBytes,
-        uint256 _amount
+        bytes32 _roleInBytes
     ) private view {
         VestingSchedule
             storage vestingSchedule = VestingSchedulePerRoleAndAddress[
                 _roleInBytes
             ][_beneficiary];
 
+        require(
+            vestingSchedule.lastClaim == 0 ||
+                vestingSchedule.lastClaim <=
+                getCurrentTime() - vestingSchedule.lastClaim,
+            "VESTING : you can only claim tokens every 24hours"
+        );
         require(
             vestingSchedule.isVested,
             "VESTING : tokens for this address and role are not vested"
@@ -209,34 +226,55 @@ contract vesting is Ownable, ReentrancyGuard {
             "VESTING: enter correct role"
         );
 
-        require(getCurrentTime() < vestingSchedule.cliff);
-
-        require(
-            availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary] >
-                vestingSchedule.tokensToReleasePerDay,
-            "VESTING: you claimed all your tokens bro"
-        );
-        require(
-            _amount < vestingSchedule.tokensToReleasePerDay,
-            "VESTING: you are not allowed to claim the entered amount of tokens"
-        );
+        require(getCurrentTime() >= vestingSchedule.cliff);
     }
 
     function releaseVestedTokens(
         address _beneficiary,
-        string memory _roleInString,
-        uint256 _amount
+        string memory _roleInString
     ) public {
         bytes32 _roleInBytes = getRoleInBytesFromString(_roleInString);
-        prereleaseVestedTokensValidation(_beneficiary, _roleInBytes, _amount);
+
+        VestingSchedule
+            storage vestingSchedule = VestingSchedulePerRoleAndAddress[
+                _roleInBytes
+            ][_beneficiary];
+
+        prereleaseVestedTokensValidation(_beneficiary, _roleInBytes);
+
+        uint256 timeElapsedSinceClaim = calculateTimeElapsed(
+            _roleInBytes,
+            _beneficiary
+        );
+        require(
+            timeElapsedSinceClaim > oneDayInSeconds,
+            "VESTING: YOU CANNOT CLAIM TOKENS WITHIN 24 HOURS"
+        );
+        uint256 totalVestingTime = vestingSchedule.duration -
+            vestingSchedule.cliff;
+
+        uint256 tokensToRelease = vestingSchedule
+            .totalTokensReleased
+            .mul(timeElapsedSinceClaim)
+            .div(totalVestingTime);
+        console.log(tokensToRelease, "tokens released");
+
+        require(
+            availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary] >=
+                tokensToRelease,
+            "VESTING: you claimed all your tokens bro"
+        );
 
         // update mapping
         availableTokensPerRoleAndAddress[_roleInBytes][
             _beneficiary
         ] = availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary].sub(
-            _amount
+            tokensToRelease
         );
+        // update lastclaim timestamp in mapping
+        VestingSchedulePerRoleAndAddress[_roleInBytes][_beneficiary]
+            .lastClaim = getCurrentTime();
 
-        token.safeTransfer(_beneficiary, _amount);
+        token.safeTransfer(_beneficiary, tokensToRelease);
     }
 }
