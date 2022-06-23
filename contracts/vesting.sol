@@ -64,16 +64,12 @@ contract vesting is Ownable, ReentrancyGuard {
     }
 
     function getCreatedSchedule(string memory _role, address beneficiary)
-        public
+       external
         view
         returns (VestingSchedule memory)
     {
         bytes32 roleinString = getRoleInBytesFromString(_role);
         return VestingSchedulePerRoleAndAddress[roleinString][beneficiary];
-    }
-
-    function getCurrentTime() internal view virtual returns (uint256) {
-        return block.timestamp;
     }
 
     function calculateTotalTokensReleased(uint256 _percentageOfTotalSupply)
@@ -85,7 +81,7 @@ contract vesting is Ownable, ReentrancyGuard {
     }
 
     function getRoleInBytesFromString(string memory _role)
-        public
+       public
         pure
         returns (bytes32)
     {
@@ -96,7 +92,7 @@ contract vesting is Ownable, ReentrancyGuard {
         address _beneficiary,
         bytes32 _roleInBytes,
         uint256 _percentageOfTotalSupply
-    ) private view {
+    ) internal view {
         VestingSchedule
             storage vestingSchedule = VestingSchedulePerRoleAndAddress[
                 _roleInBytes
@@ -126,7 +122,7 @@ contract vesting is Ownable, ReentrancyGuard {
     }
 
     function convertFromMonthToSeconds(uint256 _time)
-        private
+        internal 
         pure
         returns (uint256)
     {
@@ -163,7 +159,7 @@ contract vesting is Ownable, ReentrancyGuard {
             availableTokenPercentagePerRole[_roleInBytes] -
             _percentageOfTotalSupply;
 
-        uint256 createVestingScheduleTime = getCurrentTime();
+        uint256 createVestingScheduleTime = block.timestamp;
         uint256 startInSeconds = createVestingScheduleTime +
             convertFromMonthToSeconds(_startInMonths);
         uint256 cliffInSeconds = convertFromMonthToSeconds(_cliffInMonths) +
@@ -199,7 +195,7 @@ contract vesting is Ownable, ReentrancyGuard {
     }
 
     function calculateTimeElapsed(bytes32 _roleInBytes, address _beneficiary)
-        public
+       internal
         view
         returns (uint256)
     {
@@ -209,7 +205,7 @@ contract vesting is Ownable, ReentrancyGuard {
             ][_beneficiary];
 
         uint256 timeElapsed;
-        uint256 currentTime = getCurrentTime();
+        uint256 currentTime = block.timestamp;
 
         if (vestingSchedule.lastClaim == 0) {
             timeElapsed = currentTime - vestingSchedule.cliff;
@@ -223,7 +219,7 @@ contract vesting is Ownable, ReentrancyGuard {
     function prereleaseVestedTokensValidation(
         address _beneficiary,
         bytes32 _roleInBytes
-    ) private view {
+    ) internal  view {
         VestingSchedule
             storage vestingSchedule = VestingSchedulePerRoleAndAddress[
                 _roleInBytes
@@ -232,7 +228,7 @@ contract vesting is Ownable, ReentrancyGuard {
         require(
             vestingSchedule.lastClaim == 0 ||
                 vestingSchedule.lastClaim <=
-                getCurrentTime() - vestingSchedule.lastClaim,
+                block.timestamp - vestingSchedule.lastClaim,
             "VESTING : you can only claim tokens every 24hours"
         );
         require(
@@ -254,13 +250,13 @@ contract vesting is Ownable, ReentrancyGuard {
             "VESTING: enter correct role"
         );
 
-        require(getCurrentTime() >= vestingSchedule.cliff);
+        require(block.timestamp >= vestingSchedule.cliff);
     }
 
     function releaseVestedTokens(
         address _beneficiary,
         string memory _roleInString
-    ) public {
+    ) external {
         bytes32 _roleInBytes = getRoleInBytesFromString(_roleInString);
 
         VestingSchedule
@@ -296,7 +292,7 @@ contract vesting is Ownable, ReentrancyGuard {
             tokensToRelease;
         // update lastclaim timestamp in mapping
         VestingSchedulePerRoleAndAddress[_roleInBytes][_beneficiary]
-            .lastClaim = getCurrentTime();
+            .lastClaim = block.timestamp;
 
         token.safeTransfer(_beneficiary, tokensToRelease);
         emit tokensReleased(_beneficiary, _roleInBytes, tokensToRelease);
