@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.4;
 pragma experimental ABIEncoderV2;
-import "hardhat/console.sol";
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 contract vesting is Ownable, ReentrancyGuard {
     bytes32 public constant ADVISOR = keccak256("Advisor");
@@ -15,7 +13,7 @@ contract vesting is Ownable, ReentrancyGuard {
     bytes32 public constant MENTOR = keccak256("Mentor");
 
     using SafeERC20 for IERC20;
-    using SafeMath for uint256;
+
     IERC20 private immutable token;
     uint256 private immutable oneMonthInSeconds = 2629743;
     uint256 private immutable oneDayInSeconds = 86400;
@@ -83,7 +81,7 @@ contract vesting is Ownable, ReentrancyGuard {
         view
         returns (uint256)
     {
-        return token.totalSupply().mul(_percentageOfTotalSupply).div(100);
+        return (token.totalSupply() * (_percentageOfTotalSupply)) / (100);
     }
 
     function getRoleInBytesFromString(string memory _role)
@@ -132,7 +130,7 @@ contract vesting is Ownable, ReentrancyGuard {
         pure
         returns (uint256)
     {
-        return _time.mul(oneMonthInSeconds);
+        return _time * (oneMonthInSeconds);
     }
 
     function createVestingSchedule(
@@ -161,21 +159,18 @@ contract vesting is Ownable, ReentrancyGuard {
         ] = _totalTokensReleased;
 
         // update available percentace per role
-        availableTokenPercentagePerRole[
-            _roleInBytes
-        ] = availableTokenPercentagePerRole[_roleInBytes].sub(
-            _percentageOfTotalSupply
-        );
+        availableTokenPercentagePerRole[_roleInBytes] =
+            availableTokenPercentagePerRole[_roleInBytes] -
+            _percentageOfTotalSupply;
 
         uint256 createVestingScheduleTime = getCurrentTime();
-        uint256 startInSeconds = createVestingScheduleTime.add(
-            convertFromMonthToSeconds(_startInMonths)
-        );
-        uint256 cliffInSeconds = convertFromMonthToSeconds(_cliffInMonths).add(
-            startInSeconds
-        );
-        uint256 durationInSeconds = convertFromMonthToSeconds(_durationInMonths)
-            .add(cliffInSeconds);
+        uint256 startInSeconds = createVestingScheduleTime +
+            convertFromMonthToSeconds(_startInMonths);
+        uint256 cliffInSeconds = convertFromMonthToSeconds(_cliffInMonths) +
+            startInSeconds;
+        uint256 durationInSeconds = convertFromMonthToSeconds(
+            _durationInMonths
+        ) + (cliffInSeconds);
 
         // create schedule in mapping
         VestingSchedulePerRoleAndAddress[_roleInBytes][
@@ -217,7 +212,7 @@ contract vesting is Ownable, ReentrancyGuard {
         uint256 currentTime = getCurrentTime();
 
         if (vestingSchedule.lastClaim == 0) {
-            timeElapsed = currentTime.sub(vestingSchedule.cliff);
+            timeElapsed = currentTime - vestingSchedule.cliff;
         } else {
             timeElapsed = currentTime - vestingSchedule.lastClaim;
         }
@@ -286,11 +281,8 @@ contract vesting is Ownable, ReentrancyGuard {
         uint256 totalVestingTime = vestingSchedule.duration -
             vestingSchedule.cliff;
 
-        uint256 tokensToRelease = vestingSchedule
-            .totalTokensReleased
-            .mul(timeElapsedSinceClaim)
-            .div(totalVestingTime);
-        console.log(tokensToRelease, "tokens released");
+        uint256 tokensToRelease = (vestingSchedule.totalTokensReleased *
+            (timeElapsedSinceClaim)) / (totalVestingTime);
 
         require(
             availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary] >=
@@ -299,11 +291,9 @@ contract vesting is Ownable, ReentrancyGuard {
         );
 
         // update mapping
-        availableTokensPerRoleAndAddress[_roleInBytes][
-            _beneficiary
-        ] = availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary].sub(
-            tokensToRelease
-        );
+        availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary] =
+            availableTokensPerRoleAndAddress[_roleInBytes][_beneficiary] -
+            tokensToRelease;
         // update lastclaim timestamp in mapping
         VestingSchedulePerRoleAndAddress[_roleInBytes][_beneficiary]
             .lastClaim = getCurrentTime();
