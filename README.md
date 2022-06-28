@@ -56,7 +56,7 @@ Custom ERC20 token for vesting.
 
 > git clone https://github.com/majinbruce/TOKEN-VESTING-CONTRACT.git
 
-3. Install Dependencies:
+2. Install Dependencies:
 
 > npm init --yes </br>
 
